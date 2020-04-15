@@ -22,9 +22,10 @@ symbols = ["SPY", "EFA", "BND", "VNQ", "GSG"] ##ETFs across different asset clas
 
 dict_ETF_data = {}
 for symbol in symbols:
-   dict_ETF_data[symbol] = yf.Ticker(symbol).history(time_period)['Close'].dropna()
+   dict_ETF_data[symbol] = yf.Ticker(symbol).history(time_period)['Close']
    
-df = pd.DataFrame(dict_ETF_data)
+df = pd.DataFrame(dict_ETF_data).dropna()
+print(df)
 
 def moving_average(x, N):
     return pd.Series(x).rolling(window=N).mean().iloc[N-1:].values
@@ -65,9 +66,14 @@ for i in range(training_period-momentum_long, df.shape[0] - momentum_long, int(h
     returns = 0
     d_momentum_vals = mom_diff(symbols, i ,momentum_long, momentum_short)
     req_ETFs = sorted(d_momentum_vals, key=(lambda key:d_momentum_vals[key]), reverse=True)[:2]
-    print(req_ETFs)
     returns = 0.5 * (dict_ETF_data[req_ETFs[0]].iloc[i+1+h_p]/dict_ETF_data[req_ETFs[0]].iloc[i+1] - 1) \
     + 0.5 * (dict_ETF_data[req_ETFs[1]].iloc[i+1+h_p]/dict_ETF_data[req_ETFs[1]].iloc[i+1] - 1)
     ret_test.append(returns * 100)
 
 s_r_test = (statistics.mean(ret_test) - rf)/statistics.stdev(ret_test)
+##looks good
+
+###What should I get into now:
+d_momentum_vals_now = mom_diff(symbols, df.shape[0], momentum_long, momentum_short)
+req_ETFs_now = sorted(d_momentum_vals, key=(lambda key:d_momentum_vals_now[key]), reverse=True)[:2]
+print(req_ETFs_now)
