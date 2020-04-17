@@ -1,3 +1,7 @@
+##Based on Pairs Trading on International ETFs SSRN Paper
+##https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1958546
+##Added in cointegration check for pairs 
+
 import pandas as pd
 import numpy as np 
 import itertools
@@ -5,54 +9,155 @@ import yfinance as yf
 import statistics
 from tests import ADF
 from tests import get_johansen
+from functools import reduce
 
-time_period = '160mo'
-formation_period = 120##days
+time_period = '200mo'
+formation_period = 180##days
+trading_period = 20 ##days
+holding_period = 20
+rf = 0.5
+c_in = 1.75 ##threshold value
+c_out = 1.0
+stop_loss = -7
 
-df = pd.read_csv('C:/Git stuff/Other-strategies/Country_ETFs.csv', encoding= 'unicode_escape')
+###retrieve ETF data from Yahoo
+def yahoo_data():
 
-l_ETFs = list(df['ETF or ETN'].apply(lambda x: x.split()[-1]))
-d_ETFs = {}
+    df = pd.read_csv('C:/Git stuff/Other-strategies/Country_ETFs.csv', encoding= 'unicode_escape')
 
-for i in l_ETFs:
-    d_ETFs[i] = yf.Ticker(i).history(time_period)['Close']
-        
-
-df_ETFs = pd.DataFrame(d_ETFs).dropna()
-d_appreciated = {}
-
-for i in l_ETFs:
-    d_appreciated[str(i)] = (1 + (df_ETFs[i] / df_ETFs[i].shift(1) - 1))
-
-df_appreciated = pd.DataFrame(d_appreciated).dropna()
-d_normalized = {}
-
-for i in l_ETFs:
-    for t in range(formation_period):
-        d_normalized[str(i)] = df_appreciated[i].iloc[:t].cumprod()
-        
-df_normalized = pd.DataFrame(d_normalized).dropna()
-print(df_normalized)
-
-def distance(index_A, index_B):
-    return 1/formation_period  * sum(abs(index_A - index_B))
-
-d_distances = {}
-d_ETFs = {}
-
-l_ETFs_pairs = list(itertools.combinations(l_ETFs, 2))
-
-coint_pairs = []
-
-###Check if pairs are cointegrated
-for i in l_ETFs_pairs:
-    if ADF(df_ETFs[i[0]]) and ADF(df_ETFs[i[1]]):
-        joint_pairs_series = pd.merge(df_ETFs[i[0]], df_ETFs[i[1]], left_index=True, right_index=True)
-        if get_johansen(joint_pairs_series, 0):
-            if get_johansen(joint_pairs_series, 0)[0] != 0:
-                coint_pairs.append(i)
+    l_ETFs = list(df['ETF or ETN'].apply(lambda x: x.split()[-1]))
+    d_ETFs = {}
+    l_ETFs_pairs = list(itertools.combinations(l_ETFs, 2))
     
-for i in coint_pairs:
-    d_distances[i] = distance(df_normalized[i[0]], df_normalized[i[1]])
+    for i in l_ETFs:
+        d_ETFs[i] = yf.Ticker(i).history(time_period)['Close']
+            
+    df_ETFs = pd.DataFrame(d_ETFs).dropna()
+    
+    return l_ETFs, df_ETFs, l_ETFs_pairs
 
-final_pairs = sorted(d_distances, key=(lambda key:d_distances[key]))[:5] ##5 pairs with the smallest distances 
+###Normalized prices of the ETF's, as per paper 
+def normalized_prices(l_ETFs, df_ETFs):
+    
+    d_appreciated = {}
+    
+    for i in l_ETFs:
+        d_appreciated[str(i)] = (1 + (df_ETFs[i] / df_ETFs[i].shift(1) - 1))
+    
+    df_appreciated = pd.DataFrame(d_appreciated).dropna()
+    d_normalized = {}
+    
+    for i in l_ETFs:
+        d_normalized[str(i)] = df_appreciated[i].cumprod()
+            
+    df_normalized = pd.DataFrame(d_normalized).dropna()
+    
+    return df_normalized
+
+###calculate distances between two ETF's
+def distance(index_A, index_B):
+    return 1/index_A.shape[0]  * sum(abs(index_A - index_B))
+
+###Obtain cointegrated pairs
+def get_coint_pairs(l_ETFs_pairs, df_ETFs, strategy_run_day):
+    
+    coint_pairs = []    
+    
+    ###Check if pairs are cointegrated
+    for i in l_ETFs_pairs:
+        stock_1 = df_ETFs[i[0]].iloc[strategy_run_day:strategy_run_day+formation_period]
+        stock_2 = df_ETFs[i[1]].iloc[strategy_run_day:strategy_run_day+formation_period]
+        if ADF(stock_1) and ADF(stock_2):
+            joint_pairs_series = pd.merge(stock_1, stock_2, left_index=True, right_index=True)
+            if get_johansen(joint_pairs_series, 0):
+                if get_johansen(joint_pairs_series, 0)[0] != 0:
+                    coint_pairs.append(i)
+    
+    return coint_pairs
+
+###Obtain pairs that are coinegrated and have the biggest distances
+def get_final_pairs(coint_pairs, df_normalized, strategy_run_day):
+    
+    d_distances = {}
+    
+    for i in coint_pairs:
+        d_distances[i] = distance(df_normalized[i[0]], df_normalized[i[1]])
+        
+    final_pairs = sorted(d_distances, key=(lambda key:d_distances[key]), reverse = True)[:5] ##5 pairs with the biggest distances 
+    
+    return final_pairs
+
+
+def returns_from_strategy(trading_period, formation_period):
+    
+    l_ETFs, df_ETFs, l_ETFs_pairs = yahoo_data() 
+    
+    df_normalized = normalized_prices(l_ETFs, df_ETFs)
+    training_period = round(0.8 * df_normalized.shape[0])
+    ret_formation_period = []
+    
+    #df_ETFs = yahoo_data()[1]
+    df_ETFs = pd.read_csv('C:/Git stuff/Other-strategies/df_ETFs.csv')
+    
+    ###Obtain pairs for each formation period up to the training period 
+    strategy_run_day = 0
+    while strategy_run_day < training_period:
+    
+        coint_pairs = get_coint_pairs(l_ETFs_pairs, df_ETFs, strategy_run_day)
+        final_pairs = get_final_pairs(coint_pairs, df_normalized.iloc[strategy_run_day:strategy_run_day+formation_period], formation_period)
+        ret = []
+    
+        for pair in final_pairs:
+            daily_returns = []
+            cumulative_returns = 0
+            flag = 0
+            no_of_days_in_trade = 0
+            d_distance = distance(df_normalized[pair[0]].iloc[strategy_run_day:strategy_run_day+formation_period], df_normalized[pair[1]].iloc[strategy_run_day:strategy_run_day+formation_period])
+            
+            for t in range(trading_period):
+                ###check if trade can be entered based on threshold in and if the trade hasnt been entered
+                ###into for the current trading period
+                if c_in * d_distance < abs(df_normalized[pair[0]].iloc[strategy_run_day+formation_period+t] - df_normalized[pair[1]].iloc[strategy_run_day+formation_period+t]) and flag == 0:
+                    print('made it through')
+                    
+                    for h_p in range(holding_period):   
+                        print('abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p]) is {}'.format(abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p])))
+                        print(c_out * d_distance)
+                        ###should one remain in the trade based on threshold out
+                        if c_out * d_distance < abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p]) and cumulative_returns > stop_loss:
+                            print('made it through 2nd')
+                            
+                            flag = 1 ###entered trade
+                            
+                            no_of_days_in_trade += 1 ###determine how long one should remain in the trade 
+                            
+                            num = df_ETFs[pair[0]].iloc[strategy_run_day +formation_period+t+h_p]
+                            denom = df_ETFs[pair[0]].iloc[strategy_run_day +formation_period+t+h_p-1]
+                            num_1 = df_ETFs[pair[1]].iloc[strategy_run_day +formation_period+t+h_p]
+                            denom_1 = df_ETFs[pair[1]].iloc[strategy_run_day +formation_period+t+h_p-1]
+                            
+                            daily_returns.append((-1 * ((num/denom)-1) + 1 * ((num_1/denom_1)-1)) + 1)
+
+                            cumulative_returns = 100*((reduce(lambda x, y: x*y,daily_returns))-1)
+                            
+                        else:
+                            break
+
+            
+            if cumulative_returns != 0:
+                print(cumulative_returns)
+                ret.append(cumulative_returns)
+        
+        strategy_run_day = strategy_run_day + formation_period + trading_period + holding_period
+        
+        ret_formation_period.append(ret)
+        
+    return ret_formation_period
+
+ret = returns_from_strategy(trading_period, formation_period)
+flat_ret = [item for sublist in ret for item in sublist]
+print(ret)
+
+s_r = (statistics.mean(flat_ret) - rf)/statistics.stdev(flat_ret)
+
+print(s_r)
