@@ -23,7 +23,7 @@ stop_loss = -7
 ###retrieve ETF data from Yahoo
 def yahoo_data():
 
-    df = pd.read_csv('C:/Git stuff/Other-strategies/Country_ETFs.csv', encoding= 'unicode_escape')
+    df = pd.read_csv('C:/Git stuff/Other-strategies/Other-strategies/Country_ETFs.csv', encoding= 'unicode_escape')
 
     l_ETFs = list(df['ETF or ETN'].apply(lambda x: x.split()[-1]))
     d_ETFs = {}
@@ -87,7 +87,7 @@ def get_final_pairs(coint_pairs, df_normalized, strategy_run_day):
     
     return final_pairs
 
-
+##calculating the returns from this strategy
 def returns_from_strategy(trading_period, formation_period):
     
     l_ETFs, df_ETFs, l_ETFs_pairs = yahoo_data() 
@@ -97,7 +97,7 @@ def returns_from_strategy(trading_period, formation_period):
     ret_formation_period = []
     
     #df_ETFs = yahoo_data()[1]
-    df_ETFs = pd.read_csv('C:/Git stuff/Other-strategies/df_ETFs.csv')
+    df_ETFs = pd.read_csv('C:/Git stuff/Other-strategies/Other-strategies/df_ETFs.csv')
     
     ###Obtain pairs for each formation period up to the training period 
     strategy_run_day = 0
@@ -118,14 +118,11 @@ def returns_from_strategy(trading_period, formation_period):
                 ###check if trade can be entered based on threshold in and if the trade hasnt been entered
                 ###into for the current trading period
                 if c_in * d_distance < abs(df_normalized[pair[0]].iloc[strategy_run_day+formation_period+t] - df_normalized[pair[1]].iloc[strategy_run_day+formation_period+t]) and flag == 0:
-                    print('made it through')
                     
                     for h_p in range(holding_period):   
-                        print('abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p]) is {}'.format(abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p])))
-                        print(c_out * d_distance)
+
                         ###should one remain in the trade based on threshold out
                         if c_out * d_distance < abs(df_normalized[pair[0]].iloc[strategy_run_day + formation_period+t+h_p] - df_normalized[pair[1]].iloc[strategy_run_day + formation_period+t+h_p]) and cumulative_returns > stop_loss:
-                            print('made it through 2nd')
                             
                             flag = 1 ###entered trade
                             
@@ -145,7 +142,7 @@ def returns_from_strategy(trading_period, formation_period):
 
             
             if cumulative_returns != 0:
-                print(cumulative_returns)
+                
                 ret.append(cumulative_returns)
         
         strategy_run_day = strategy_run_day + formation_period + trading_period + holding_period
@@ -156,8 +153,14 @@ def returns_from_strategy(trading_period, formation_period):
 
 ret = returns_from_strategy(trading_period, formation_period)
 flat_ret = [item for sublist in ret for item in sublist]
-print(ret)
 
+##calculating the sharpe
 s_r = (statistics.mean(flat_ret) - rf)/statistics.stdev(flat_ret)
 
-print(s_r)
+###Now, to choose the pairs to get into going forward
+l_ETFs, df_ETFs, l_ETFs_pairs = yahoo_data()
+df_normalized = normalized_prices(l_ETFs, df_ETFs)
+time_start_pair_formation = df_normalized.shape[0] - formation_period - trading_period - holding_period
+coint_pairs_use = get_coint_pairs(l_ETFs_pairs, df_ETFs, time_start_pair_formation)
+final_pairs_use = get_final_pairs(coint_pairs_use, df_normalized.iloc[time_start_pair_formation:time_start_pair_formation+formation_period], formation_period)
+
