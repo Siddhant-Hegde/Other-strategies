@@ -161,6 +161,8 @@ s_r = (statistics.mean(flat_ret) - rf)/statistics.stdev(flat_ret)
 l_ETFs, df_ETFs, l_ETFs_pairs = yahoo_data()
 df_normalized = normalized_prices(l_ETFs, df_ETFs)
 time_start_pair_formation = df_normalized.shape[0] - formation_period - trading_period - holding_period
+###cointegrated pairs
 coint_pairs_use = get_coint_pairs(l_ETFs_pairs, df_ETFs, time_start_pair_formation)
+###final pairs to use
 final_pairs_use = get_final_pairs(coint_pairs_use, df_normalized.iloc[time_start_pair_formation:time_start_pair_formation+formation_period], formation_period)
 
